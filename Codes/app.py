@@ -1,4 +1,5 @@
-from flask import Flask, redirect, url_for, abort, make_response, json, jsonify, request
+from flask import Flask, redirect, url_for, abort, make_response, json, jsonify, request, session, g
+import os
 import click
 
 app = Flask(__name__)
@@ -87,11 +88,11 @@ def not_found():
 def tea():
     abort(418)
 
-@app.route('/foo')
-def foo():
-    response = make_response('hello world')
-    response.mimetype = 'text/plain'
-    return response
+# @app.route('/foo')
+# def foo():
+#     response = make_response('hello world')
+#     response.mimetype = 'text/plain'
+#     return response
 
 @app.route('/note')
 def note():
@@ -134,3 +135,122 @@ def last():
     if name is None:
         name = request.cookies.get('name', 'human')
     return f'<h1>Hello, {name}</h1>'
+
+# # session的cookie安全
+# # 1.session的随机密钥
+# @app.route('/secret')
+# def secret():
+#     ## 更安全的做法是写进.env文件之中
+#     app.secret_key = os.getenv('SECRET_KEY', 's3123212')
+#     return redirect(url_for('login'))
+
+# # 2.模拟用户认证
+# @app.route('/login')
+# def login():
+#     session['logged_in'] = True ## 写入session
+#     return redirect(url_for('test_login')) ## 必须保证.env文件写入了密钥
+
+# @app.route('/test_login')
+# def test_login():
+#     name = request.args.get('name')
+#     if name is None:
+#         name = request.cookies.get('name', 'sunny')
+#         response = f'<h1>hello {name}</h1>'
+#         if 'logged_in' in session:
+#             response += '[Authenticated]'
+#         else:
+#             response += '[Not Authenticated]'
+#         return response
+
+# @app.route('/admin')
+# def admin():
+#     if 'logged_in' not in session:
+#         abort(403)
+#     return 'welcome to admin page'
+
+# # 用户登出
+# @app.route('/logout')
+# def logout():
+#     if 'logged_in' in session:
+#         session.pop('logged_in')
+#     return redirect(url_for('test_login'))
+
+# # 程序上下文
+# @app.before_request
+# def get_name():
+#     g.name = request.args.get('name')
+
+# '''激活上下文'''
+# from app import app
+# from flask import current_app
+# # with 语句激活上下文
+# with app.app_context():
+#     current_app.name
+
+# # 显式使用push方法激活上下文, 执行完相关操作后pop退出
+# app_ctx = app.app_context()
+# app_ctx.push()
+# print(current_app.name)
+# app_ctx.pop()
+
+# # 请求上下文可以通过test_request_context()方法临时创建
+# with app.test_request_context('/hello'):
+#     request.method
+#     # 这里同样可以使用push和pop方法显式激活或者销毁请求上下文
+    
+# # 上下文钩子 --- 简单了解： 例如在请求处理结束后，需要数据库关闭链接
+# @app.teardown_appcontext()
+# def teardown_db(exception):
+#     db.close()
+
+# http进阶实践
+# 重定向回上一个页面
+# @app.route('/foo')
+# def foo():
+#     return f'<h1>Foo gpage</h1><a href={url_for('do_something')}>Do something</a>'
+# @app.route('/bar')
+# def bar():
+#     return f'<h1>Bar page</h1><a href={url_for('do_something')}>Do something</a>'
+# @app.route('/do_something')
+# def do_something():
+#     # do something
+#     return redirect(url_for('test_login'))
+
+@app.route('/test_login')
+def test_login():
+    return f'<h1>test_login</h1>'
+
+# 获取上一个页面的url (1)http referrer (2)查询参数
+# return redirect(request.referrer)
+# 添加备用选项
+# return redirect(request.referrer or url_for('hello))
+
+# 手动加入包含当前页面的url查询参数
+@app.route('/foo')
+def foo():
+    return f'<h1>Foo page</h1><a href={url_for('do_something', next=request.full_path)}>Do something</a>'
+@app.route('/bar')
+def bar():
+    return f'<h1>Bar page</h1><a href={url_for('do_something', next=request.full_path)}>Do something</a>'
+
+
+@app.route('/do_something_and_redirect')
+def do_something():
+    # do something
+    return redirect_back()
+
+# 确保next的url是应用程序内的验证过的url
+from urllib.parse import urlparse, urljoin
+def is_safe_url(target):
+    ref_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    return test_url.scheme in ('http', 'https') and ref_url.netloc == test_url.netloc
+
+# 重定向到默认的hello视图, 安全版
+def redirect_back(default='test_login', **kwargs):
+    for target in request.args.get('next'), request.referrer:
+        if not target:
+            continue
+        if is_safe_url(target):
+            return redirect(target)
+    return redirect(url_for(default, **kwargs))
